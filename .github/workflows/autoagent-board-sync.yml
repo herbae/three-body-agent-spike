@@ -31,14 +31,15 @@ jobs:
 
       - name: Extract issue number from branch
         id: issue
-        run: |
-          BRANCH="${{ github.head_ref }}"
-          # Extract issue number from branch name: autoagent/353-wire-categorization-rules → 353
-          ISSUE_NUM=$(echo "$BRANCH" | sed 's|autoagent/||' | grep -oE '^[0-9]+')
-          echo "number=$ISSUE_NUM" >> $GITHUB_OUTPUT
-          echo "Issue: #$ISSUE_NUM from branch: $BRANCH"
         env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          # Route github.head_ref through env to avoid script injection via branch name.
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          # Extract issue number from branch name: autoagent/353-wire-categorization-rules → 353
+          ISSUE_NUM=$(echo "$BRANCH" | sed 's|autoagent/||' | grep -oE '^[0-9]+')
+          echo "number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
+          echo "Issue: #$ISSUE_NUM from branch: $BRANCH"
 
       - name: Get project item ID
         id: project
@@ -111,9 +112,7 @@ jobs:
           echo "#${ISSUE_NUM} → READY FOR QA"
 
           # Notify via configured provider
-          NOTIFY_MSG="PR ready for QA: #${ISSUE_NUM}
-${PR_TITLE}
-${PR_URL}"
+          NOTIFY_MSG=$(printf 'PR ready for QA: #%s\n%s\n%s' "$ISSUE_NUM" "$PR_TITLE" "$PR_URL")
           case "${AUTOAGENT_NOTIFY_PROVIDER:-none}" in
             telegram)
               if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then

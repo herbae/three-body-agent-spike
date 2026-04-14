@@ -59,8 +59,10 @@ jobs:
 
       - name: Skip (none)
         if: env.AUTOAGENT_NOTIFY_PROVIDER == 'none'
-        run: echo "notify: provider=none, skipping"
+        run: |
+          echo "notify: provider=none, skipping"
 
       - name: Skip (unknown/empty)
         if: env.AUTOAGENT_NOTIFY_PROVIDER != 'telegram' && env.AUTOAGENT_NOTIFY_PROVIDER != 'slack' && env.AUTOAGENT_NOTIFY_PROVIDER != 'none'
-        run: echo "notify: provider='${AUTOAGENT_NOTIFY_PROVIDER:-<unset>}' unknown, skipping"
+        run: |
+          echo "notify: provider='${AUTOAGENT_NOTIFY_PROVIDER:-<unset>}' unknown, skipping"

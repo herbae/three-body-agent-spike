@@ -1,0 +1,46 @@
+# .github/workflows/test-workflows-lint.yml
+# Run actionlint across every workflow and composite action to catch YAML /
+# GitHub Actions syntax issues before they land on main. Complements
+# test-autoagent-config.yml, which validates the config loader shell script.
+#
+# actionlint is not preinstalled on ubuntu-latest. We download a pinned release
+# tarball directly from rhysd/actionlint's release page — simpler supply chain
+# than a marketplace action or curl|bash pipe, and the version stays pinned for
+# reproducibility. Bump ACTIONLINT_VERSION deliberately; don't track latest.
+
+name: Lint workflows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+  workflow_dispatch:
+
+env:
+  ACTIONLINT_VERSION: 1.7.7
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}"
+          curl -fsSL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tar -xzf actionlint.tar.gz actionlint
+          sudo install -m 0755 actionlint /usr/local/bin/actionlint
+          actionlint -version
+
+      - name: Run actionlint
+        run: actionlint -color
