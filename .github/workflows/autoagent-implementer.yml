@@ -27,15 +27,6 @@ concurrency:
   group: autoagent-implementer
   cancel-in-progress: false
 
-env:
-  # TODO: Change these to your org and repo
-  PROJECT_ORG: your-org
-  REPO: your-org/your-repo
-  # TODO: Change to your GitHub Projects V2 number
-  PROJECT_NUMBER: 1
-  # TODO: Change to your milestone format function, or remove milestone filtering
-  # Current format: "YY CW WW" (e.g., "26 CW 14")
-
 jobs:
   prepare:
     runs-on: ubuntu-latest
@@ -50,28 +41,43 @@ jobs:
       issue_title: ${{ steps.resolve.outputs.issue_title }}
       base_branch: ${{ steps.resolve.outputs.base_branch }}
       model: ${{ steps.resolve.outputs.model }}
+      timeout: ${{ steps.resolve.outputs.timeout }}
       start_message: ${{ steps.msg.outputs.start_message }}
 
     steps:
+      - name: Checkout .github
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: false
+
+      - name: Load autoagent config
+        uses: ./.github/actions/autoagent-setup
+
       - name: Resolve issue to implement
         id: resolve
         env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          INPUT_ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+          INPUT_MODEL: ${{ github.event.inputs.model }}
+          INPUT_BASE_BRANCH: ${{ github.event.inputs.base_branch }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -e
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             # Manual dispatch  - use provided inputs
-            ISSUE_NUM="${{ github.event.inputs.issue_number }}"
-            MODEL="${{ github.event.inputs.model }}"
-            BASE="${{ github.event.inputs.base_branch }}"
+            ISSUE_NUM="$INPUT_ISSUE_NUMBER"
+            MODEL="$INPUT_MODEL"
+            BASE="$INPUT_BASE_BRANCH"
             ISSUE_TITLE=$(gh issue view "$ISSUE_NUM" --repo "${{ github.repository }}" --json title -q '.title' 2>/dev/null || echo "Unknown")
 
-            echo "issue_number=$ISSUE_NUM" >> $GITHUB_OUTPUT
-            echo "issue_title=$ISSUE_TITLE" >> $GITHUB_OUTPUT
-            echo "base_branch=$BASE" >> $GITHUB_OUTPUT
-            echo "model=$MODEL" >> $GITHUB_OUTPUT
-            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "issue_number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
+            echo "issue_title=$ISSUE_TITLE" >> "$GITHUB_OUTPUT"
+            echo "base_branch=$BASE" >> "$GITHUB_OUTPUT"
+            echo "model=$MODEL" >> "$GITHUB_OUTPUT"
+            echo "timeout=$AUTOAGENT_IMPLEMENTER_TIMEOUT" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -96,8 +102,8 @@ jobs:
 
             gh api graphql -f query='
               query {
-                organization(login: "'"$PROJECT_ORG"'") {
-                  projectV2(number: '"$PROJECT_NUMBER"') {
+                organization(login: "'"$AUTOAGENT_ORG"'") {
+                  projectV2(number: '"$AUTOAGENT_PROJECT_NUMBER"') {
                     items(first: 100, after: '"$CURSOR_ARG"') {
                       pageInfo {
                         hasNextPage
@@ -105,7 +111,7 @@ jobs:
                       }
                       nodes {
                         id
-                        fieldValueByName(name: "Status") {
+                        fieldValueByName(name: "'"$AUTOAGENT_STATUS_FIELD"'") {
                           ... on ProjectV2ItemFieldSingleSelectValue {
                             name
                           }
@@ -133,7 +139,7 @@ jobs:
 
             jq -r '
               .data.organization.projectV2.items.nodes[]
-              | select(.fieldValueByName.name == "Todo")
+              | select(.fieldValueByName.name == "'"$AUTOAGENT_COL_TODO"'")
               | select(.content.state == "OPEN")
               | select(.content.milestone.title == "'"$CURRENT_MILESTONE"'")
               | {
@@ -154,7 +160,7 @@ jobs:
 
           if [ -z "$TODO_ITEMS" ]; then
             echo "No TODO issues found in milestone ${CURRENT_MILESTONE}. Standing by."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -165,7 +171,7 @@ jobs:
           RUNNING=$(gh run list --workflow=autoagent-implementer.yml --status in_progress --json databaseId --jq 'length')
           if [ "$RUNNING" -gt 1 ]; then
             echo "Implementer already running. Skipping."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -189,17 +195,17 @@ jobs:
 
           if [ -z "$ISSUE_NUM" ] || [ "$ISSUE_NUM" = "null" ]; then
             echo "No suitable issue found."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "Selected: #${ISSUE_NUM}  - ${ISSUE_TITLE}"
 
           # Check if issue already has an open PR
-          EXISTING_PR=$(gh pr list --search "head:autoagent/${ISSUE_NUM}" --state open --json number --jq 'length')
+          EXISTING_PR=$(gh pr list --search "head:${AUTOAGENT_BRANCH_PREFIX}${ISSUE_NUM}" --state open --json number --jq 'length')
           if [ "$EXISTING_PR" -gt 0 ]; then
             echo "Issue #${ISSUE_NUM} already has an open PR. Skipping."
-            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -209,7 +215,7 @@ jobs:
 
           DEP_NUM=$(echo "$ISSUE_BODY" | sed -n 's/.*Depends on:*\s*#*\([0-9]\+\).*/\1/p' | head -1)
           if [ -n "$DEP_NUM" ]; then
-            DEP_BRANCH=$(gh pr list --search "head:autoagent/${DEP_NUM}" --state open --json headRefName --jq '.[0].headRefName // empty')
+            DEP_BRANCH=$(gh pr list --search "head:${AUTOAGENT_BRANCH_PREFIX}${DEP_NUM}" --state open --json headRefName --jq '.[0].headRefName // empty')
             if [ -n "$DEP_BRANCH" ]; then
               BASE_BRANCH="$DEP_BRANCH"
               echo "Dependency detected: #${DEP_NUM} → base branch: ${BASE_BRANCH}"
@@ -219,8 +225,8 @@ jobs:
           # Move to IN PROGRESS on the board
           PROJECT_ID=$(gh api graphql -f query='
             query {
-              organization(login: "'"$PROJECT_ORG"'") {
-                projectV2(number: '"$PROJECT_NUMBER"') { id }
+              organization(login: "'"$AUTOAGENT_ORG"'") {
+                projectV2(number: '"$AUTOAGENT_PROJECT_NUMBER"') { id }
               }
             }
           ' --jq '.data.organization.projectV2.id')
@@ -229,7 +235,7 @@ jobs:
             query {
               node(id: \"${PROJECT_ID}\") {
                 ... on ProjectV2 {
-                  field(name: \"Status\") {
+                  field(name: \"${AUTOAGENT_STATUS_FIELD}\") {
                     ... on ProjectV2SingleSelectField {
                       id
                       options { id name }
@@ -244,7 +250,7 @@ jobs:
             query {
               node(id: \"${PROJECT_ID}\") {
                 ... on ProjectV2 {
-                  field(name: \"Status\") {
+                  field(name: \"${AUTOAGENT_STATUS_FIELD}\") {
                     ... on ProjectV2SingleSelectField {
                       options { id name }
                     }
@@ -252,7 +258,7 @@ jobs:
                 }
               }
             }
-          " --jq '.data.node.field.options[] | select(.name == "In Progress") | .id')
+          " --jq ".data.node.field.options[] | select(.name == \"${AUTOAGENT_COL_IN_PROGRESS}\") | .id")
 
           gh api graphql -f query="
             mutation {
@@ -269,20 +275,24 @@ jobs:
 
           echo "Moved #${ISSUE_NUM} to IN PROGRESS"
 
-          echo "issue_number=$ISSUE_NUM" >> $GITHUB_OUTPUT
-          echo "issue_title=$ISSUE_TITLE" >> $GITHUB_OUTPUT
-          echo "base_branch=$BASE_BRANCH" >> $GITHUB_OUTPUT
-          echo "model=claude-opus-4-6" >> $GITHUB_OUTPUT
-          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "issue_number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
+          echo "issue_title=$ISSUE_TITLE" >> "$GITHUB_OUTPUT"
+          echo "base_branch=$BASE_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "model=$AUTOAGENT_IMPLEMENTER_MODEL" >> "$GITHUB_OUTPUT"
+          echo "timeout=$AUTOAGENT_IMPLEMENTER_TIMEOUT" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Build start message
         id: msg
         if: steps.resolve.outputs.skip != 'true'
+        env:
+          ISSUE_NUMBER: ${{ steps.resolve.outputs.issue_number }}
+          ISSUE_TITLE: ${{ steps.resolve.outputs.issue_title }}
         run: |
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           {
             echo 'start_message<<EOF'
-            echo "🏗️ [AUTOAGENT] Implementer  - #${{ steps.resolve.outputs.issue_number }} ${{ steps.resolve.outputs.issue_title }}"
+            echo "🏗️ [AUTOAGENT] Implementer  - #${ISSUE_NUMBER} ${ISSUE_TITLE}"
             echo "${RUN_URL}"
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
@@ -307,7 +317,7 @@ jobs:
       pull-requests: write
       issues: write
       actions: read
-    timeout-minutes: 90
+    timeout-minutes: ${{ fromJSON(needs.prepare.outputs.timeout) }}
     outputs:
       after_message: ${{ steps.summary.outputs.after_message }}
 
@@ -319,6 +329,9 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.AGENT_PAT }}
 
+      - name: Load autoagent config
+        uses: ./.github/actions/autoagent-setup
+
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
@@ -327,57 +340,64 @@ jobs:
       #   run: npm install
 
       - name: Fetch issue details
-        run: |
-          gh issue view "${{ needs.prepare.outputs.issue_number }}" --json title,body,labels > /tmp/issue.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+        run: |
+          gh issue view "$ISSUE_NUMBER" --json title,body,labels > /tmp/issue.json
 
       - name: Implement with Claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ISSUE_NUM: ${{ needs.prepare.outputs.issue_number }}
+          BASE: ${{ needs.prepare.outputs.base_branch }}
+          CLAUDE_MODEL: ${{ needs.prepare.outputs.model }}
         run: |
-          ISSUE_NUM="${{ needs.prepare.outputs.issue_number }}"
-          BASE="${{ needs.prepare.outputs.base_branch }}"
           ISSUE_BODY=$(jq -r '.body' /tmp/issue.json)
           ISSUE_TITLE=$(jq -r '.title' /tmp/issue.json)
 
           export ISSUE_NUM ISSUE_TITLE ISSUE_BODY BASE
-          git show origin/main:.github/prompts/implementer.md | envsubst '$ISSUE_NUM $ISSUE_TITLE $ISSUE_BODY $BASE' | \
-            claude -p --verbose --output-format stream-json --model "${{ needs.prepare.outputs.model }}" --max-turns 500 \
+          envsubst '$ISSUE_NUM $ISSUE_TITLE $ISSUE_BODY $BASE' < .github/prompts/implementer.md | \
+            claude -p --verbose --output-format stream-json --model "$CLAUDE_MODEL" --max-turns "$AUTOAGENT_IMPLEMENTER_MAX_TURNS" \
               --permission-mode auto
 
       - name: Comment on success
         if: success()
-        run: |
-          PR_URL=$(gh pr list --search "${{ needs.prepare.outputs.issue_number }}" --json url -q '.[0].url' 2>/dev/null || echo "")
-          if [ -n "$PR_URL" ]; then
-            gh issue comment "${{ needs.prepare.outputs.issue_number }}" \
-              --body "Implementation complete. PR: ${PR_URL}"
-          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+        run: |
+          PR_URL=$(gh pr list --search "$ISSUE_NUMBER" --json url -q '.[0].url' 2>/dev/null || echo "")
+          if [ -n "$PR_URL" ]; then
+            gh issue comment "$ISSUE_NUMBER" \
+              --body "Implementation complete. PR: ${PR_URL}"
+          fi
 
       - name: Comment on failure
         if: failure()
-        run: |
-          gh issue comment "${{ needs.prepare.outputs.issue_number }}" \
-            --body "Autoagent failed. [Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" \
+            --body "Autoagent failed. [Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
 
       - name: Capture summary
         id: summary
         if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
+          ISSUE_TITLE: ${{ needs.prepare.outputs.issue_title }}
+          STATUS: ${{ job.status }}
+          BASE_BRANCH: ${{ needs.prepare.outputs.base_branch }}
+          CLAUDE_MODEL: ${{ needs.prepare.outputs.model }}
         run: |
-          ISSUE_NUM="${{ needs.prepare.outputs.issue_number }}"
-          ISSUE_TITLE="${{ needs.prepare.outputs.issue_title }}"
-          STATUS="${{ job.status }}"
-
-          PR_URL=$(gh pr list --search "head:autoagent/${ISSUE_NUM}" --state open --json url -q '.[0].url' 2>/dev/null || echo "")
+          PR_URL=$(gh pr list --search "head:${AUTOAGENT_BRANCH_PREFIX}${ISSUE_NUMBER}" --state open --json url -q '.[0].url' 2>/dev/null || echo "")
 
           BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
-          COMMITS=$(git log --pretty="- %s" origin/${{ needs.prepare.outputs.base_branch }}..HEAD 2>/dev/null | head -20 || echo "- No commits")
-          FILES_CHANGED=$(git diff --name-only origin/${{ needs.prepare.outputs.base_branch }}..HEAD 2>/dev/null | wc -l | tr -d ' ')
+          COMMITS=$(git log --pretty="- %s" "origin/${BASE_BRANCH}..HEAD" 2>/dev/null | head -20 || echo "- No commits")
+          FILES_CHANGED=$(git diff --name-only "origin/${BASE_BRANCH}..HEAD" 2>/dev/null | wc -l | tr -d ' ')
 
           # Job summary
           {
@@ -385,11 +405,11 @@ jobs:
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| **Issue** | #${ISSUE_NUM} - ${ISSUE_TITLE} |"
+            echo "| **Issue** | #${ISSUE_NUMBER} - ${ISSUE_TITLE} |"
             echo "| **Status** | ${STATUS} |"
-            echo "| **Model** | ${{ needs.prepare.outputs.model }} |"
+            echo "| **Model** | ${CLAUDE_MODEL} |"
             echo "| **Branch** | \`${BRANCH}\` |"
-            echo "| **Base** | \`${{ needs.prepare.outputs.base_branch }}\` |"
+            echo "| **Base** | \`${BASE_BRANCH}\` |"
             echo "| **Files changed** | ${FILES_CHANGED} |"
             if [ -n "$PR_URL" ]; then
               echo "| **PR** | ${PR_URL} |"
@@ -399,31 +419,29 @@ jobs:
             echo "${COMMITS}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          # Telegram message
+          # Notification message
           if [ "$STATUS" = "success" ] && [ -n "$PR_URL" ]; then
             {
               echo 'after_message<<EOF'
-              echo "[AUTOAGENT] Implementer done - #${ISSUE_NUM} ${ISSUE_TITLE}"
+              echo "[AUTOAGENT] Implementer done - #${ISSUE_NUMBER} ${ISSUE_TITLE}"
               echo "PR: ${PR_URL}"
               echo 'EOF'
             } >> "$GITHUB_OUTPUT"
           elif [ "$STATUS" = "success" ]; then
             {
               echo 'after_message<<EOF'
-              echo "[AUTOAGENT] Implementer done - #${ISSUE_NUM} ${ISSUE_TITLE}"
+              echo "[AUTOAGENT] Implementer done - #${ISSUE_NUMBER} ${ISSUE_TITLE}"
               echo 'EOF'
             } >> "$GITHUB_OUTPUT"
           else
             RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             {
               echo 'after_message<<EOF'
-              echo "[AUTOAGENT] Implementer failed - #${ISSUE_NUM} ${ISSUE_TITLE}"
+              echo "[AUTOAGENT] Implementer failed - #${ISSUE_NUMBER} ${ISSUE_TITLE}"
               echo "${RUN_URL}"
               echo 'EOF'
             } >> "$GITHUB_OUTPUT"
           fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   notify-done:
     needs: implement
