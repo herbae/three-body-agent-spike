@@ -5,6 +5,12 @@ Follow these steps IN ORDER. Do not skip steps. Do not ask for human input.
 
 ${ISSUE_BODY}
 
+## Change-set (from Planner, if any)
+
+${CHANGE_SET}
+
+If the block above is empty, no change-set was produced (either the Planner was skipped or this issue was dispatched directly). Fall back to the issue body as your spec. If the block is populated, treat it as authoritative: stay within its declared scope, respect the risk classification in its frontmatter, and do not invent work it doesn't list. The `## Files to touch` section is your shopping list — if you need to touch something outside it, stop and comment on the issue explaining why instead.
+
 ---
 
 ## Step 0: Understand the Project

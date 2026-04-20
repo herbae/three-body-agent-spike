@@ -346,6 +346,37 @@ jobs:
         run: |
           gh issue view "$ISSUE_NUMBER" --json title,body,labels > /tmp/issue.json
 
+      - name: Fetch change-set (if present)
+        id: changeset
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          ISSUE_NUM: ${{ needs.prepare.outputs.issue_number }}
+        run: |
+          set -eo pipefail
+          CHANGE_SET=""
+
+          # Priority 1: committed change-set (high-risk path after spec PR merged).
+          if [ -f "docs/change-sets/${ISSUE_NUM}.md" ]; then
+            CHANGE_SET=$(cat "docs/change-sets/${ISSUE_NUM}.md")
+            echo "source=file:docs/change-sets/${ISSUE_NUM}.md" >> "$GITHUB_OUTPUT"
+          else
+            # Priority 2: latest issue comment with the AUTOAGENT_CHANGE_SET marker.
+            LATEST=$(gh issue view "$ISSUE_NUM" --json comments \
+              --jq '[.comments[] | select(.body | startswith("<!-- AUTOAGENT_CHANGE_SET -->"))] | last.body // ""')
+            if [ -n "$LATEST" ]; then
+              CHANGE_SET=$(printf '%s\n' "$LATEST" | tail -n +2)
+              echo "source=issue-comment" >> "$GITHUB_OUTPUT"
+            else
+              echo "source=none" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+          {
+            echo "change_set<<AUTOAGENT_EOF"
+            printf '%s\n' "$CHANGE_SET"
+            echo "AUTOAGENT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Implement with Claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -356,13 +387,15 @@ jobs:
           ISSUE_NUM: ${{ needs.prepare.outputs.issue_number }}
           BASE: ${{ needs.prepare.outputs.base_branch }}
           CLAUDE_MODEL: ${{ needs.prepare.outputs.model }}
+          CHANGE_SET: ${{ steps.changeset.outputs.change_set }}
         run: |
           ISSUE_BODY=$(jq -r '.body' /tmp/issue.json)
           ISSUE_TITLE=$(jq -r '.title' /tmp/issue.json)
 
           export ISSUE_NUM ISSUE_TITLE ISSUE_BODY BASE
           export TEST_RETRY_BUDGET="$AUTOAGENT_IMPLEMENTER_TEST_RETRY_BUDGET"
-          envsubst '$ISSUE_NUM $ISSUE_TITLE $ISSUE_BODY $BASE $TEST_RETRY_BUDGET' < .github/prompts/implementer.md | \
+          export CHANGE_SET
+          envsubst '$ISSUE_NUM $ISSUE_TITLE $ISSUE_BODY $BASE $TEST_RETRY_BUDGET $CHANGE_SET' < .github/prompts/implementer.md | \
             claude -p --verbose --output-format stream-json --model "$CLAUDE_MODEL" --max-turns "$AUTOAGENT_IMPLEMENTER_MAX_TURNS" \
               --permission-mode auto
 
