@@ -371,7 +371,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ needs.prepare.outputs.issue_number }}
         run: |
-          PR_URL=$(gh pr list --search "$ISSUE_NUMBER" --json url -q '.[0].url' 2>/dev/null || echo "")
+          PR_URL=$(gh pr list --search "head:${AUTOAGENT_BRANCH_PREFIX}${ISSUE_NUMBER}" --state open --json url -q '.[0].url' 2>/dev/null || echo "")
           if [ -n "$PR_URL" ]; then
             gh issue comment "$ISSUE_NUMBER" \
               --body "Implementation complete. PR: ${PR_URL}"
