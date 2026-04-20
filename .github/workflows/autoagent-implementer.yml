@@ -349,6 +349,10 @@ jobs:
       - name: Implement with Claude
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Expose AGENT_PAT as GH_TOKEN so Claude's `gh pr create` can authenticate.
+          # The checkout action already set AGENT_PAT for git operations, but `gh`
+          # reads GH_TOKEN from the environment, not from git config.
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
           ISSUE_NUM: ${{ needs.prepare.outputs.issue_number }}
           BASE: ${{ needs.prepare.outputs.base_branch }}
           CLAUDE_MODEL: ${{ needs.prepare.outputs.model }}
