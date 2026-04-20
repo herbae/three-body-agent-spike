@@ -72,6 +72,31 @@ All state is expressed as **Projects V2 `Status` column transitions** driven by 
 
 ## 3. Workflows in detail
 
+### 3.0 `autoagent-planner.yml` (286 lines)
+
+**Triggers**
+- `issues` on `labeled` — fires for every label event; a gate step compares the label name to `$AUTOAGENT_LABEL_PLAN` (from `.github/autoagent-config.yml`) and writes `skip=true` to `GITHUB_OUTPUT` if they do not match, short-circuiting all subsequent steps.
+- `workflow_dispatch` with inputs `issue_number` (required) and `base_branch` (default `main`).
+
+**Concurrency**: `autoagent-planner-<issue_num>`, `cancel-in-progress: false`. The key mixes both event shapes (`github.event.issue.number` for label events, `inputs.issue_number` for dispatches).
+
+**Permissions**: `contents: write`, `issues: write`, `pull-requests: write` — all three are needed because the high-risk path commits a file and opens a PR, while the low/medium path posts an issue comment.
+
+**Jobs**
+1. `plan` (30 min, single job) — resolves inputs, installs Claude Code, runs the Planner prompt, parses the risk tier, labels the issue, and routes to one of two downstream actions.
+2. `notify` — calls `notify.yml` (reusable) after `plan` completes; fires even on failure if `issue_num` output is non-empty.
+
+**`plan` step-by-step**
+1. **Checkout** (`AGENT_PAT`, `fetch-depth: 0`) and **load config** via `.github/actions/autoagent-setup` (exports `AUTOAGENT_*` env vars for the rest of the job).
+2. **Gate**: compare `github.event.label.name` to `$AUTOAGENT_LABEL_PLAN`; set `skip=true` if mismatch.
+3. **Resolve inputs**: for `workflow_dispatch`, read `inputs.issue_number` + `inputs.base_branch`; for label events, read `github.event.issue.number` and default base to `main`. Fetch `title` and `body` from `gh issue view`.
+4. **Install Claude Code**: `npm install -g @anthropic-ai/claude-code`.
+5. **Run Planner**: render `.github/prompts/planner.md` with `envsubst '$PLAN_LABEL $ISSUE_NUM $ISSUE_TITLE $ISSUE_BODY $BASE'`, then invoke `claude -p --model $AUTOAGENT_PLANNER_MODEL --max-turns $AUTOAGENT_PLANNER_MAX_TURNS --permission-mode auto --output-format text`. Assert `/tmp/change-set.md` is non-empty; parse `risk` with `yq --front-matter=extract '.risk'`; validate it is one of `low | medium | high`.
+6. **Apply risk label**: `gh issue edit --add-label $AUTOAGENT_LABEL_{LOW|MEDIUM|HIGH}_RISK` and remove the plan label.
+7. **Route by risk**:
+   - **low / medium** — post `/tmp/change-set.md` as an issue comment prefixed with the sentinel `<!-- AUTOAGENT_CHANGE_SET -->`, then `gh workflow run autoagent-implementer.yml -f issue_number=… -f base_branch=… -f model=$AUTOAGENT_IMPLEMENTER_MODEL`.
+   - **high** — commit the change-set to `docs/change-sets/<N>.md` on a new branch `<BRANCH_PREFIX>plan-<N>-<slug>` branched off `origin/$BASE`, then open a spec PR with instructions for the human reviewer. The Implementer is **not** dispatched — the pipeline pauses until a human manually triggers it.
+
 ### 3.1 `autoagent-implementer.yml` (436 lines)
 
 **Triggers**
@@ -218,6 +243,18 @@ Reusable workflow; single step that POSTs to `https://api.telegram.org/bot$TOKEN
 ---
 
 ## 4. Prompts
+
+### 4.0 `.github/prompts/planner.md` (82 lines)
+
+- **Placeholders**: `${PLAN_LABEL}`, `${ISSUE_NUM}`, `${ISSUE_TITLE}`, `${ISSUE_BODY}`, `${BASE}`.
+- **Role**: the Planner is explicitly told it is *not* a code-writing agent. Its only output is `/tmp/change-set.md` — a YAML-frontmatter document specifying scope, files to touch, API contract changes, a test plan, risk justification, and open questions. It must not create branches, commit, or open PRs.
+- **Change-set format**: frontmatter keys `risk:` (one of `low | medium | high`), `issue:` (integer), `base:` (branch name), followed by freeform markdown sections. The frontmatter is machine-parsed by the workflow with `yq`.
+- **Risk rubric** (from high to low):
+  - **high**: database schema / migrations; auth, IAM, or secrets; public API surface; infrastructure-as-code (Terraform, Docker, Kubernetes, CI pipeline core control flow); new runtime dependencies.  *Carve-out*: editing prompts under `.github/prompts/` or non-critical helper workflows is `medium`, not `high`.
+  - **medium**: substantial new business logic; refactor touching more than 3 call-sites; new first-class module.
+  - **low**: bug fixes, docs, tests, copy changes, UI tweaks, internal renames, config values.
+  - Tie-break rule: low vs. medium → pick `medium`; medium vs. high → pick `high`.
+- **Guardrails**: must read `CLAUDE.md` and `ARCHITECTURE.md` before classifying; must not invent requirements not stated in the issue (file them under "Open questions" instead); frontmatter keys must be exact.
 
 ### 4.1 `.github/prompts/implementer.md` (62 lines)
 
