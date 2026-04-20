@@ -1,0 +1,45 @@
+name: Plannable feature
+description: Request a change that the AI Factory will plan, implement, and merge autonomously.
+title: "<short imperative summary>"
+labels: ["plan"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue will be picked up by the Planner agent. The Planner produces a change-set and classifies risk. High-risk changes open a spec PR for human review; low/medium-risk changes dispatch straight to the Implementer.
+  - type: input
+    id: priority
+    attributes:
+      label: Priority
+      description: "p0 (blocker) … p5 (backlog). Add the matching label after filing."
+      placeholder: "p2"
+    validations: {required: true}
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: "Why does this matter? What broke or what's the opportunity?"
+    validations: {required: true}
+  - type: textarea
+    id: desired_outcome
+    attributes:
+      label: Desired outcome
+      description: "What does 'done' look like? Be concrete."
+    validations: {required: true}
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Out of scope
+      description: "Anything related that should NOT be included in this change-set."
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: "Use 'Depends on: #123' to base this work on another open PR. Multi-line allowed."
+      placeholder: "Depends on: #123"
+  - type: input
+    id: acceptance
+    attributes:
+      label: Acceptance test
+      description: "The single observable behaviour that proves this shipped."
+    validations: {required: true}
