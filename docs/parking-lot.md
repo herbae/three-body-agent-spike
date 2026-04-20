@@ -22,6 +22,24 @@ The `pull_request` trigger only listens for `[opened, closed]`. If a PR is reope
 
 `f735bfb` fixed the PR search in the Implementer's `Comment on success` step but the fix hasn't been exercised on a live run. Next dispatch will tell. If the comment still doesn't post, dig deeper.
 
+## Planner: high-risk re-run idempotency
+
+**Surfaced by:** Task 7 code review on commit `21a4262`.
+
+If a high-risk issue is re-planned (second `plan` label add, or manual re-dispatch) after a previous successful Planner run, the current flow breaks:
+
+- Slug is deterministic, so `BRANCH` name repeats.
+- `git push -u origin "$BRANCH"` fails non-fast-forward if the remote has diverged.
+- `gh pr create` fails if a spec PR already targets that head.
+- If the previous spec PR was merged, `docs/change-sets/${N}.md` already exists on main and `git commit` errors with "nothing to commit" under `set -e`.
+
+Mitigations to consider:
+- Detect an open spec PR on the same head and no-op with an issue comment explaining.
+- Append a short run-id suffix to the branch name to allow fresh spec PRs.
+- Detect `git commit --allow-empty` is needed and branch accordingly.
+
+Not critical — no known user-facing regression until we start re-planning issues, which the normal cadence shouldn't do.
+
 ## Upgrade `actions/checkout@v4 → @v5`
 
 GitHub CI annotates that `actions/checkout@v4` uses Node.js 20 — deprecated June 2026. Bump to `@v5` across all workflows when convenient.
