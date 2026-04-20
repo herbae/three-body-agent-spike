@@ -119,7 +119,7 @@ Milestone format: `"YY CW WW"` (e.g., `"26 CW 14"`)
 
 ### Telegram Notifications
 
-**Reusable workflow** | **File**: `telegram.yml`
+**Reusable workflow** | **File**: `notify.yml`
 
 Every workflow sends notifications at start and completion. Silence is the worst signal for autonomous agents - you can't tell the difference between "nothing happened" and "everything is broken."
 
@@ -146,7 +146,7 @@ Add these secrets to your repository (Settings → Secrets and variables → Act
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot API token (from [@BotFather](https://t.me/BotFather)). Optional - see note below.                                                                       |
 | `TELEGRAM_CHAT_ID`   | Telegram chat ID for notifications. Optional - see note below.                                                                                                       |
 
-> **Notifications are pluggable.** The template uses Telegram, but any messaging service works - Slack, Discord, email, etc. Just swap the `curl` call in `telegram.yml` with your preferred webhook or API. The reusable workflow pattern stays the same.
+> **Notifications are pluggable.** The template uses Telegram, but any messaging service works - Slack, Discord, email, etc. Just swap the `curl` call in `notify.yml` with your preferred webhook or API. The reusable workflow pattern stays the same.
 
 ### 3. Configure the workflows
 
