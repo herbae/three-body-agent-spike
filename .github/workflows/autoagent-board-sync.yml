@@ -1,9 +1,9 @@
 name: '[AUTOAGENT] Board Sync'
 
 on:
-  # pull_request:
-  #   types: [opened, closed]
-  #   branches: [main]
+  pull_request:
+    types: [opened, closed]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
