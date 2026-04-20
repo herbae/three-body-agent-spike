@@ -361,6 +361,9 @@ jobs:
             echo "source=file:docs/change-sets/${ISSUE_NUM}.md" >> "$GITHUB_OUTPUT"
           else
             # Priority 2: latest issue comment with the AUTOAGENT_CHANGE_SET marker.
+            # NOTE: gh issue view --json comments returns only the first ~100 comments
+            # without pagination. For hyper-active issues the marker may fall off the
+            # returned slice; the fallback to issue body below is the fail-safe path.
             LATEST=$(gh issue view "$ISSUE_NUM" --json comments \
               --jq '[.comments[] | select(.body | startswith("<!-- AUTOAGENT_CHANGE_SET -->"))] | last.body // ""')
             if [ -n "$LATEST" ]; then
@@ -371,10 +374,13 @@ jobs:
             fi
           fi
 
+          # Per-run random delimiter so even an adversarial change-set containing
+          # the literal string "AUTOAGENT_CHANGE_SET_EOF" can't truncate the output.
+          DELIM="__CHANGE_SET_EOF_$(openssl rand -hex 8)__"
           {
-            echo "change_set<<AUTOAGENT_EOF"
+            echo "change_set<<${DELIM}"
             printf '%s\n' "$CHANGE_SET"
-            echo "AUTOAGENT_EOF"
+            echo "${DELIM}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Implement with Claude

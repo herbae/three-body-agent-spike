@@ -194,8 +194,11 @@ jobs:
         run: |
           set -eo pipefail
 
-          # Post change-set as issue comment (marker allows downstream tooling to find it).
-          COMMENT_BODY="$(printf '<!-- AUTOAGENT_CHANGE_SET -->\n**Planner change-set (risk: %s)**\n\n' "$RISK")$(cat /tmp/change-set.md)"
+          # Post change-set as issue comment. Format: marker line, then the raw
+          # change-set body verbatim. Kept symmetric with the high-risk file path
+          # (docs/change-sets/${N}.md) so the Implementer's `tail -n +2` yields
+          # an identical change-set from either source.
+          COMMENT_BODY="$(printf '<!-- AUTOAGENT_CHANGE_SET -->\n')$(cat /tmp/change-set.md)"
           gh issue comment "$ISSUE_NUM" --body "$COMMENT_BODY"
 
           # Dispatch Implementer.
