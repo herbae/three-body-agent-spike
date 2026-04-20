@@ -40,16 +40,19 @@ Execute the plan step by step:
 
 ## Step 4: Inner test loop (MANDATORY)
 
-You have a **retry budget of ${TEST_RETRY_BUDGET} iterations** to get the test suite green before opening the PR.
+Your **retry budget is ${TEST_RETRY_BUDGET} fix attempts** after the initial test run.
 
-For each iteration:
-1. Run the project's test command (infer it from `package.json`, `Makefile`, `pyproject.toml`, `Cargo.toml`, etc. — pick the most local one).
-2. If all tests pass: break out of the loop and proceed to Step 5.
-3. If any test fails:
-   - Read the failure output (not just the summary — actual assertions, stack traces).
-   - Fix the root cause (not the test, unless the test itself is wrong and you can justify it).
-   - Commit the fix with a message like `fix(test): <what you fixed>`.
-   - Decrement the retry counter.
+Run the project's test command (infer it from `package.json`, `Makefile`, `pyproject.toml`, `Cargo.toml`, etc. — pick the most local one).
+
+If all tests pass on the first run, proceed to Step 5.
+
+If any test fails, begin the fix loop. For each attempt:
+1. Read the failure output (not just the summary — actual assertions, stack traces).
+2. Fix the root cause (not the test, unless the test itself is wrong and you can justify it).
+3. Commit the fix with a message like `fix(test): <what you fixed>`.
+4. Re-run the test suite.
+
+You may make at most ${TEST_RETRY_BUDGET} such attempts. Count each one whether it passed or not. Once all tests pass, proceed to Step 5.
 
 If the retry budget is exhausted and tests still fail:
 - Do NOT abandon the work. Open the PR anyway as a **draft** (`gh pr create --draft`).
