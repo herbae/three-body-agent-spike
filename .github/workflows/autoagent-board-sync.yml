@@ -8,11 +8,15 @@ on:
 
 jobs:
   sync:
-    # Only for autoagent branches.
+    # Only for autoagent implementation branches. Spec PRs on plan branches
+    # (autoagent/plan-<N>-...) are deliberately excluded — merging the spec
+    # is human approval of the change-set, NOT the start of implementation,
+    # so the card should stay in Todo until the Implementer opens its own PR.
+    #
     # NOTE: Job-level `if:` expressions cannot reference env vars, so the branch
     # prefix is hardcoded here. If you change branch.prefix in autoagent-config.yml,
     # update this expression too.
-    if: startsWith(github.head_ref, 'autoagent/')
+    if: startsWith(github.head_ref, 'autoagent/') && !startsWith(github.head_ref, 'autoagent/plan-')
     runs-on: ubuntu-latest
     permissions:
       contents: read
