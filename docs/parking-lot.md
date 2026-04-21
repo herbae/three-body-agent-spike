@@ -66,6 +66,28 @@ Fix options:
 
 Not critical — the PR still opens and the board still transitions; the issue just doesn't get the convenience comment. First-class priority the next time we touch the Implementer workflow.
 
+## Merger: skip plan branches
+
+**Surfaced by:** 2026-04-21 high-risk flow on `herbae-org/foreman-todo-api` issue #1 (while fixing board-sync's plan-branch bug).
+
+The Merger's PR scan (`autoagent-merger.yml`) filters by `startsWith(.headRefName, "autoagent/")`. That set includes spec PRs on `autoagent/plan-*` branches. If the Merger cron (or a manual dispatch) fires while a spec PR is open, it would run the Claude merge-analysis and potentially auto-merge the spec — **bypassing the human review gate that high-risk is supposed to impose**.
+
+Same fix as `fix(board-sync): skip plan branches` (commit `3ea68fa`): add `!startsWith(.headRefName, "autoagent/plan-")` to whatever filter the Merger uses. Needs a quick read of `autoagent-merger.yml` to confirm the exact site.
+
+Not blocking today because the Merger runs on a slow cron and we're dispatching it manually; but it's a trap for anyone who tightens the cron or turns on scheduled execution.
+
+## Pipeline replication: foreman ↔ foreman-todo-api drift
+
+**Surfaced by:** 2026-04-21 board-sync fix had to be applied in BOTH repos.
+
+The AI Factory pipeline lives in `.github/` of every repo that uses it. Bug fixes in the canonical source (foreman) need to be copy-pasted to every instance (foreman-todo-api today; future forks). No mechanism to sync.
+
+Possible mitigations when this becomes painful:
+- A `sync-pipeline.yml` cron in each instance repo that pulls `.github/` from foreman and opens a PR with the diff.
+- Or: publish the pipeline as a composite action or reusable workflow hosted in foreman; instance repos only ship `.github/autoagent-config.yml` + thin wrappers. More invasive but clean.
+
+For now, manual sync is fine.
+
 ## Upgrade `actions/checkout@v4 → @v5`
 
 GitHub CI annotates that `actions/checkout@v4` uses Node.js 20 — deprecated June 2026. Bump to `@v5` across all workflows when convenient.
