@@ -107,8 +107,11 @@ jobs:
           READY_COUNT=$(wc -l < /tmp/merger-ready-prs.txt | tr -d ' ')
           echo "Found ${READY_COUNT} merge-ready PR(s)"
 
-          # Pass PR list as base64 to preserve newlines
-          PR_LIST=$(cat /tmp/merger-ready-prs.txt | base64)
+          # Pass PR list as base64 to preserve newlines.
+          # -w 0 disables base64's default 76-char line wrap: without it, long PR
+          # titles produce multi-line output that breaks GITHUB_OUTPUT's key=value
+          # parsing (only the first line is picked up, truncating the value).
+          PR_LIST=$(base64 -w 0 /tmp/merger-ready-prs.txt)
           echo "pr_list=$PR_LIST" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
